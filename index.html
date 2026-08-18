@@ -151,6 +151,9 @@
 
   .err{ color: var(--rust); font-size: 12px; margin-top: 8px; display:none; }
 
+  .buscador{ margin-bottom: 12px; }
+  .buscador input{ width: 100%; }
+
   .filtros{ display:flex; gap: 6px; margin-bottom: 16px; }
   .filtro-btn{
     background: transparent;
@@ -169,6 +172,19 @@
   }
 
   .lista{ display:flex; flex-direction:column; }
+
+  .grupo-fecha{
+    font-family: 'Roboto Slab', serif;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--amber);
+    text-transform: capitalize;
+    padding: 18px 4px 8px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 2px;
+  }
+  .grupo-fecha:first-child{ padding-top: 4px; }
+  .grupo-fecha.vencido{ color: var(--rust); }
 
   .tarea{
     display:flex;
@@ -350,6 +366,10 @@
     <div class="err" id="errMsg">Escribí algo para anotar.</div>
   </div>
 
+  <div class="buscador">
+    <input type="text" id="inputBuscar" placeholder="Buscar anotaciones...">
+  </div>
+
   <div class="filtros">
     <button class="filtro-btn activo" data-filtro="pendientes">Pendientes</button>
     <button class="filtro-btn" data-filtro="hechas">Hechas</button>
@@ -368,6 +388,7 @@
 
   let tareas = [];
   let filtroActual = 'pendientes';
+  let busquedaActual = '';
   let editandoId = null;
   let pin = null;
 
@@ -516,7 +537,9 @@
     }
   }
 
-  async function borrarTarea(id){
+  async function borrarTarea(id, titulo){
+    const ok = confirm(`¿Borrar "${titulo}"?\n\nEsta acción no se puede deshacer.`);
+    if(!ok) return;
     try{
       const res = await llamarApi('delete', { id });
       if(res.ok){ tareas = res.tareas; render(); mostrarToast('Anotación borrada'); }
@@ -566,10 +589,42 @@
     });
   }
 
+  function capitalizar(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
+
+  function tituloGrupo(fechaStr){
+    if(!fechaStr || !/^\d{4}-\d{2}-\d{2}$/.test(fechaStr)) return { texto: 'Sin fecha', vencido: false };
+    const [y,m,d] = fechaStr.split('-').map(Number);
+    const fecha = new Date(y, m-1, d);
+    const hoy = new Date();
+    hoy.setHours(0,0,0,0);
+    const diffDias = Math.round((fecha - hoy) / 86400000);
+    const dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+    const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    const corta = `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}`;
+    if(diffDias === 0) return { texto: `Hoy · ${corta}`, vencido: false };
+    if(diffDias === 1) return { texto: `Mañana · ${corta}`, vencido: false };
+    if(diffDias === -1) return { texto: `Ayer · ${corta}`, vencido: true };
+    const base = `${capitalizar(dias[fecha.getDay()])}, ${d} de ${meses[m-1]}`;
+    return { texto: base, vencido: diffDias < 0 };
+  }
+
+  function formatearHoraChip(horaStr){
+    if(!horaStr || !/^\d{2}:\d{2}$/.test(horaStr)) return null;
+    return horaStr;
+  }
+
   function render(){
     let visibles = tareas;
     if(filtroActual === 'pendientes') visibles = tareas.filter(t => !t.hecha);
     else if(filtroActual === 'hechas') visibles = tareas.filter(t => t.hecha);
+
+    const termino = busquedaActual.trim().toLowerCase();
+    if(termino){
+      visibles = visibles.filter(t =>
+        (t.titulo || '').toLowerCase().includes(termino) ||
+        (t.categoria || '').toLowerCase().includes(termino)
+      );
+    }
 
     visibles = ordenar(visibles);
     listaEl.innerHTML = '';
@@ -580,10 +635,21 @@
       let msg = 'No tenés anotaciones pendientes.';
       if(filtroActual === 'hechas') msg = 'Todavía no marcaste nada como hecho.';
       if(filtroActual === 'todas') msg = 'Tu agenda está vacía. Anotá lo primero que se te ocurra.';
+      if(termino) msg = `No encontré nada con "${busquedaActual.trim()}".`;
       vacio.innerHTML = `<div class="icono">&#9998;</div><p>${msg}</p>`;
       listaEl.appendChild(vacio);
     } else {
+      let grupoAnterior = undefined;
       visibles.forEach(t => {
+        if(t.fecha !== grupoAnterior){
+          grupoAnterior = t.fecha;
+          const info = tituloGrupo(t.fecha);
+          const header = document.createElement('div');
+          header.className = 'grupo-fecha' + (info.vencido ? ' vencido' : '');
+          header.textContent = info.texto;
+          listaEl.appendChild(header);
+        }
+
         const row = document.createElement('div');
         row.className = 'tarea' + (t.hecha ? ' hecha' : '');
 
@@ -633,12 +699,12 @@
 
         const meta = document.createElement('div');
         meta.className = 'meta';
-        const fechaInfo = formatearFechaChip(t.fecha, t.hora);
-        if(fechaInfo){
-          const chipFecha = document.createElement('span');
-          chipFecha.className = 'chip fecha' + (fechaInfo.vencida && !t.hecha ? ' vencida' : '');
-          chipFecha.textContent = fechaInfo.texto;
-          meta.appendChild(chipFecha);
+        const horaChip = formatearHoraChip(t.hora);
+        if(horaChip){
+          const chipHora = document.createElement('span');
+          chipHora.className = 'chip fecha';
+          chipHora.textContent = horaChip;
+          meta.appendChild(chipHora);
         }
         if(t.categoria && t.categoria !== 'General'){
           const chipCat = document.createElement('span');
@@ -659,7 +725,7 @@
         del.className = 'del';
         del.setAttribute('aria-label', 'Borrar');
         del.innerHTML = '&#10005;';
-        del.onclick = () => borrarTarea(t.id);
+        del.onclick = () => borrarTarea(t.id, t.titulo);
         acciones.appendChild(edit);
         acciones.appendChild(del);
 
@@ -685,6 +751,11 @@
       filtroActual = btn.dataset.filtro;
       render();
     });
+  });
+
+  document.getElementById('inputBuscar').addEventListener('input', (e) => {
+    busquedaActual = e.target.value;
+    render();
   });
 
   document.getElementById('btnDesbloquear').onclick = intentarDesbloquear;
