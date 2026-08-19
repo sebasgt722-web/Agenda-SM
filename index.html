@@ -195,6 +195,16 @@
   }
   .tarea:last-child{ border-bottom:none; }
 
+  .numero{
+    width: 20px;
+    flex: 0 0 auto;
+    text-align: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+    margin-top: 5px;
+  }
+
   .check{
     width: 20px; height: 20px;
     border-radius: 50%;
@@ -371,13 +381,12 @@
   </div>
 
   <div class="filtros">
-    <button class="filtro-btn activo" data-filtro="pendientes">Pendientes</button>
-    <button class="filtro-btn" data-filtro="hechas">Hechas</button>
-    <button class="filtro-btn" data-filtro="todas">Todas</button>
+    <button class="filtro-btn activo" data-filtro="pendientes" id="btnFiltroPendientes">Pendientes</button>
+    <button class="filtro-btn" data-filtro="hechas" id="btnFiltroHechas">Hechas</button>
+    <button class="filtro-btn" data-filtro="todas" id="btnFiltroTodas">Todas</button>
   </div>
 
   <div class="lista" id="lista"><div class="spinner">Cargando...</div></div>
-  <div class="contador" id="contador"></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -640,6 +649,7 @@
       listaEl.appendChild(vacio);
     } else {
       let grupoAnterior = undefined;
+      let contadorPosicion = 0;
       visibles.forEach(t => {
         if(t.fecha !== grupoAnterior){
           grupoAnterior = t.fecha;
@@ -650,10 +660,16 @@
           listaEl.appendChild(header);
         }
 
+        contadorPosicion++;
         const row = document.createElement('div');
         row.className = 'tarea' + (t.hecha ? ' hecha' : '');
 
         if(editandoId === t.id){
+          const numero = document.createElement('div');
+          numero.className = 'numero';
+          numero.textContent = contadorPosicion;
+          row.appendChild(numero);
+
           const editBox = document.createElement('div');
           editBox.className = 'edit-box';
           const catOpciones = ['General','Pago','Compra','Trámite','Vehículo','Campo']
@@ -681,6 +697,10 @@
           document.getElementById('edit-titulo-' + t.id).focus();
           return;
         }
+
+        const numero = document.createElement('div');
+        numero.className = 'numero';
+        numero.textContent = contadorPosicion;
 
         const check = document.createElement('button');
         check.className = 'check' + (t.hecha ? ' hecha' : '');
@@ -729,6 +749,7 @@
         acciones.appendChild(edit);
         acciones.appendChild(del);
 
+        row.appendChild(numero);
         row.appendChild(check);
         row.appendChild(cuerpo);
         row.appendChild(acciones);
@@ -736,8 +757,14 @@
       });
     }
 
-    const totalPend = tareas.filter(t => !t.hecha).length;
-    contadorEl.textContent = totalPend === 0 ? 'Todo al día' : `${totalPend} anotación${totalPend === 1 ? '' : 'es'} pendiente${totalPend === 1 ? '' : 's'}`;
+    const baseConteo = termino
+      ? tareas.filter(t => (t.titulo || '').toLowerCase().includes(termino) || (t.categoria || '').toLowerCase().includes(termino))
+      : tareas;
+    const nPend = baseConteo.filter(t => !t.hecha).length;
+    const nHechas = baseConteo.filter(t => t.hecha).length;
+    document.getElementById('btnFiltroPendientes').textContent = `Pendientes (${nPend})`;
+    document.getElementById('btnFiltroHechas').textContent = `Hechas (${nHechas})`;
+    document.getElementById('btnFiltroTodas').textContent = `Todas (${nPend + nHechas})`;
   }
 
   document.getElementById('btnAdd').onclick = crearTarea;
