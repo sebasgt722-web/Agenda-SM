@@ -237,14 +237,53 @@
   .chip.fecha{ color: var(--amber); border-color: var(--amber-dim); }
   .chip.vencida{ color: #e08a6a; border-color: var(--rust); }
 
-  .acciones{ display:flex; gap: 2px; flex: 0 0 auto; }
-  .del, .edit{
+  .acciones{ display:flex; gap: 2px; flex: 0 0 auto; align-items:flex-start; }
+  .del, .edit, .hist{
     background: transparent; border: none;
     color: var(--ink-faint); cursor: pointer;
     padding: 4px; margin-top: 2px;
+    position: relative;
   }
   .del:hover{ color: var(--rust); }
   .edit:hover{ color: var(--amber); }
+  .hist:hover, .hist.tiene{ color: var(--amber); }
+  .hist .badge{
+    position: absolute;
+    top: -2px; right: -2px;
+    background: var(--amber);
+    color: #221a0d;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    border-radius: 8px;
+    min-width: 14px;
+    height: 14px;
+    line-height: 14px;
+    text-align: center;
+    padding: 0 2px;
+  }
+
+  .historial-panel{
+    grid-column: 1 / -1;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin: 0 0 14px 64px;
+  }
+  .historial-lista{ display:flex; flex-direction:column; gap: 10px; margin-bottom: 12px; }
+  .historial-item{ font-size: 13px; line-height: 1.4; }
+  .historial-fecha{
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--amber-dim);
+    display:block;
+    margin-bottom: 2px;
+  }
+  .historial-nota{ color: var(--ink); word-break: break-word; }
+  .historial-vacio{ color: var(--ink-faint); font-size: 13px; margin-bottom: 12px; }
+  .historial-add{ display:flex; gap: 8px; }
+  .historial-add input{ flex:1; min-width:0; }
 
   .edit-box{ flex: 1; min-width: 0; }
   .edit-row{ display:flex; gap: 8px; margin-bottom: 8px; }
@@ -399,6 +438,8 @@
   let filtroActual = 'pendientes';
   let busquedaActual = '';
   let editandoId = null;
+  let historialAbiertoId = null;
+  let historialCache = {};
   let pin = null;
 
   const pantallaCandado = document.getElementById('pantallaCandado');
@@ -544,6 +585,60 @@
     }catch(e){
       mostrarToast('No se pudo conectar. Revisá tu conexión.', true);
     }
+  }
+
+  async function toggleHistorial(id){
+    if(historialAbiertoId === id){
+      historialAbiertoId = null;
+      render();
+      return;
+    }
+    historialAbiertoId = id;
+    render();
+    if(!historialCache[id]){
+      try{
+        const res = await llamarApi('historial_list', { id });
+        if(res.ok){
+          historialCache[id] = res.historial;
+          render();
+        } else {
+          mostrarToast(res.error || 'No se pudo cargar el historial', true);
+        }
+      }catch(e){
+        mostrarToast('No se pudo conectar. Revisá tu conexión.', true);
+      }
+    }
+  }
+
+  async function agregarNotaHistorial(tareaId){
+    const input = document.getElementById('historial-input-' + tareaId);
+    const nota = input.value.trim();
+    if(!nota) return;
+    const btn = document.getElementById('historial-btn-' + tareaId);
+    btn.disabled = true;
+    try{
+      const res = await llamarApi('historial_add', { tareaId, nota });
+      if(res.ok){
+        historialCache[tareaId] = res.historial;
+        tareas = res.tareas;
+        render();
+      } else {
+        mostrarToast(res.error || 'No se pudo guardar el registro', true);
+      }
+    }catch(e){
+      mostrarToast('No se pudo conectar. Revisá tu conexión.', true);
+    }
+    btn.disabled = false;
+  }
+
+  function formatearFechaHistorial(ts){
+    if(!ts) return '';
+    const f = new Date(ts);
+    const dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+    const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    const hh = String(f.getHours()).padStart(2,'0');
+    const mm = String(f.getMinutes()).padStart(2,'0');
+    return `${f.getDate()} ${meses[f.getMonth()]} · ${hh}:${mm}`;
   }
 
   async function borrarTarea(id, titulo){
@@ -736,6 +831,11 @@
 
         const acciones = document.createElement('div');
         acciones.className = 'acciones';
+        const hist = document.createElement('button');
+        hist.className = 'hist' + (t.historialCount > 0 ? ' tiene' : '');
+        hist.setAttribute('aria-label', 'Historial');
+        hist.innerHTML = '&#128337;' + (t.historialCount > 0 ? `<span class="badge">${t.historialCount}</span>` : '');
+        hist.onclick = () => toggleHistorial(t.id);
         const edit = document.createElement('button');
         edit.className = 'edit';
         edit.setAttribute('aria-label', 'Editar');
@@ -746,6 +846,7 @@
         del.setAttribute('aria-label', 'Borrar');
         del.innerHTML = '&#10005;';
         del.onclick = () => borrarTarea(t.id, t.titulo);
+        acciones.appendChild(hist);
         acciones.appendChild(edit);
         acciones.appendChild(del);
 
@@ -754,6 +855,47 @@
         row.appendChild(cuerpo);
         row.appendChild(acciones);
         listaEl.appendChild(row);
+
+        if(historialAbiertoId === t.id){
+          const panel = document.createElement('div');
+          panel.className = 'historial-panel';
+
+          const entradas = historialCache[t.id];
+          if(!entradas){
+            panel.innerHTML = '<div class="historial-vacio">Cargando...</div>';
+          } else {
+            const listaHist = document.createElement('div');
+            listaHist.className = 'historial-lista';
+            if(entradas.length === 0){
+              listaHist.innerHTML = '<div class="historial-vacio">Todavía no hay registros. Anotá el primer seguimiento.</div>';
+            } else {
+              entradas.forEach(h => {
+                const item = document.createElement('div');
+                item.className = 'historial-item';
+                item.innerHTML = `<span class="historial-fecha">${formatearFechaHistorial(h.fecha)}</span><span class="historial-nota"></span>`;
+                item.querySelector('.historial-nota').textContent = h.nota;
+                listaHist.appendChild(item);
+              });
+            }
+            panel.appendChild(listaHist);
+
+            const addRow = document.createElement('div');
+            addRow.className = 'historial-add';
+            addRow.innerHTML = `
+              <input type="text" id="historial-input-${t.id}" placeholder="Ej: lo llamé, dijo que la semana que viene" maxlength="300">
+              <button class="btn-guardar" id="historial-btn-${t.id}">Agregar</button>
+            `;
+            panel.appendChild(addRow);
+          }
+
+          listaEl.appendChild(panel);
+
+          if(entradas){
+            const inputHist = document.getElementById('historial-input-' + t.id);
+            document.getElementById('historial-btn-' + t.id).onclick = () => agregarNotaHistorial(t.id);
+            inputHist.addEventListener('keydown', (e) => { if(e.key === 'Enter') agregarNotaHistorial(t.id); });
+          }
+        }
       });
     }
 
